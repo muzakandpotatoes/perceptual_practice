@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piano Pitch Guessing Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            text-align: center;
+            width: 80%;
+            max-width: 500px;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        input[type="text"] {
+            width: 60px;
+            padding: 5px;
+            font-size: 16px;
+        }
+        #result {
+            font-size: 18px;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        .range-sliders {
+            margin: 20px 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            margin: 5px 0;
+        }
+        .slider-container input {
+            flex-grow: 1;
+            margin: 0 10px;
+        }
+        .slider-label {
+            width: 50px;
+            text-align: right;
+        }
+        .pitch-classes {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .pitch-class {
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Piano Pitch Guessing Game</h1>
+        <p>Set the pitch range:</p>
+        <div class="range-sliders">
+            <div class="slider-container">
+                <span class="slider-label">Min:</span>
+                <input type="range" id="minSlider" min="0" max="87" value="0" step="1">
+                <span id="minValue">A0</span>
+            </div>
+            <div class="slider-container">
+                <span class="slider-label">Max:</span>
+                <input type="range" id="maxSlider" min="0" max="87" value="87" step="1">
+                <span id="maxValue">C8</span>
+            </div>
+        </div>
+        <p id="rangeDisplay">Range: A0 - C8</p>
+        <p>Select pitch classes to include:</p>
+        <div class="pitch-classes" id="pitchClassesContainer"></div>
+        <p>Listen to the note and try to guess its pitch</p>
+        <button id="playButton">Play Note</button>
+        <input type="text" id="guessInput" placeholder="e.g. A4">
+        <button id="guessButton">Guess</button>
+        <button id="nextButton">Next</button>
+        <p id="result"></p>
+    </div>
+
+    <script>
+        let audioContext;
+        let currentNote;
+        let minNote = 0; // A0
+        let maxNote = 87; // C8
+        let isPlaying = false;
+        let oscillator;
+
+        const minSlider = document.getElementById('minSlider');
+        const maxSlider = document.getElementById('maxSlider');
+        const minValueDisplay = document.getElementById('minValue');
+        const maxValueDisplay = document.getElementById('maxValue');
+        const rangeDisplay = document.getElementById('rangeDisplay');
+        const playButton = document.getElementById('playButton');
+        const guessInput = document.getElementById('guessInput');
+        const guessButton = document.getElementById('guessButton');
+        const resultDisplay = document.getElementById('result');
+        const pitchClassesContainer = document.getElementById('pitchClassesContainer');
+
+        const noteNames = ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#'];
+        let selectedPitchClasses = new Set(noteNames);
+
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        function noteToFrequency(note) {
+            return 440 * Math.pow(2, (note - 48) / 12);
+        }
+
+        function indexToNoteName(index) {
+            const octave = Math.floor((index + 9) / 12);
+            const noteName = noteNames[index % 12];
+            return noteName + octave;
+        }
+
+        function playNote(note) {
+            if (!audioContext) initAudio();
+            
+            if (oscillator) {
+                oscillator.stop();
+            }
+
+            oscillator = audioContext.createOscillator();
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(noteToFrequency(note), audioContext.currentTime);
+            
+            const gainNode = audioContext.createGain();
+            gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.5);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 1.5);
+        }
+
+        function generateNote() {
+            const validNotes = [];
+            for (let i = minNote; i <= maxNote; i++) {
+                if (selectedPitchClasses.has(noteNames[i % 12])) {
+                    validNotes.push(i);
+                }
+            }
+            if (validNotes.length === 0) {
+                alert("No valid notes in the current range and pitch class selection. Please adjust your settings.");
+                return null;
+            }
+            return validNotes[Math.floor(Math.random() * validNotes.length)];
+        }
+
+        function updateRange() {
+            minNote = parseInt(minSlider.value);
+            maxNote = parseInt(maxSlider.value);
+            
+            if (minNote > maxNote) {
+                if (this === minSlider) {
+                    maxNote = minNote;
+                    maxSlider.value = maxNote;
+                } else {
+                    minNote = maxNote;
+                    minSlider.value = minNote;
+                }
+            }
+
+            minValueDisplay.textContent = indexToNoteName(minNote);
+            maxValueDisplay.textContent = indexToNoteName(maxNote);
+            rangeDisplay.textContent = `Range: ${indexToNoteName(minNote)} - ${indexToNoteName(maxNote)}`;
+
+            currentNote = generateNote();
+            if (currentNote !== null) {
+                resultDisplay.textContent = 'New note generated. Click "Play Note" to hear it.';
+            }
+        }
+
+        function createPitchClassCheckboxes() {
+            noteNames.forEach(noteName => {
+                const checkboxContainer = document.createElement('div');
+                checkboxContainer.className = 'pitch-class';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = noteName;
+                checkbox.checked = true;
+                checkbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        selectedPitchClasses.add(noteName);
+                    } else {
+                        selectedPitchClasses.delete(noteName);
+                    }
+                    currentNote = generateNote();
+                    if (currentNote !== null) {
+                        resultDisplay.textContent = 'New note generated. Click "Play Note" to hear it.';
+                    }
+                });
+                
+                const label = document.createElement('label');
+                label.htmlFor = noteName;
+                label.textContent = noteName;
+                
+                checkboxContainer.appendChild(checkbox);
+                checkboxContainer.appendChild(label);
+                pitchClassesContainer.appendChild(checkboxContainer);
+            });
+        }
+
+        minSlider.addEventListener('input', updateRange);
+        maxSlider.addEventListener('input', updateRange);
+
+        playButton.addEventListener('click', () => {
+            if (currentNote !== null) {
+                playNote(currentNote);
+            }
+        });
+
+        guessButton.addEventListener('click', () => {
+            if (currentNote === null) {
+                resultDisplay.textContent = 'No valid note. Adjust range or pitch classes.';
+                return;
+            }
+            const guess = guessInput.value.toUpperCase();
+            const actualNote = indexToNoteName(currentNote);
+            if (guess === actualNote) {
+                resultDisplay.textContent = `Correct! The note is ${actualNote}.`;
+            } else {
+                resultDisplay.textContent = `Not quite. The correct note is ${actualNote}.`;
+            }
+        });
+
+        document.getElementById('nextButton').addEventListener('click', () => {
+            currentNote = generateNote();
+            if (currentNote !== null) {
+                resultDisplay.textContent = 'New note generated. Click "Play Note" to hear it.';
+                guessInput.value = '';
+            }
+        });
+
+        // Initialize the game
+        createPitchClassCheckboxes();
+        currentNote = generateNote();
+    </script>
+</body>
+</html>
