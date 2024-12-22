@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<!-- Previous head and style sections remain the same -->
+<head>
+  <title>Pitch Discrimination Game</title>
+  <style>
+    /* Previous CSS remains unchanged */
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    .container {
+      background: white;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .controls {
+      margin: 2rem 0;
+    }
+    .slider-group {
+      margin-bottom: 1.5rem;
+    }
+    .slider-label {
+      display: block;
+      margin-bottom: 0.5rem;
+      color: #555;
+    }
+    .value-display {
+      font-size: 0.9rem;
+      color: #666;
+      margin-top: 0.25rem;
+    }
+    .button-group {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      margin: 1rem 0;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 4px;
+      background: #2563eb;
+      color: white;
+      cursor: pointer;
+      min-width: 100px;
+    }
+    button:disabled {
+      background: #93c5fd;
+      cursor: not-allowed;
+    }
+    button.next {
+      background: #059669;
+    }
+    .feedback {
+      text-align: center;
+      margin: 1rem 0;
+      padding: 1rem;
+      border-radius: 4px;
+    }
+    .feedback.correct {
+      background: #bbf7d0;
+      color: #166534;
+    }
+    .feedback.incorrect {
+      background: #fecaca;
+      color: #991b1b;
+    }
+    .score {
+      text-align: center;
+      font-size: 1.2rem;
+      margin: 1rem 0;
+    }
+    .keyboard-hints {
+      text-align: center;
+      color: #666;
+      font-size: 0.9rem;
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Pitch Discrimination Game</h1>
+    
+    <div class="controls">
+      <div class="slider-group">
+        <label class="slider-label">Base Frequency Range</label>
+        <div>
+          <label>Minimum note:</label>
+          <input type="range" id="minFreq" min="0" max="87" value="39" step="1">
+          <div class="value-display" id="minFreqDisplay">C4</div>
+        </div>
+        <div>
+          <label>Maximum note:</label>
+          <input type="range" id="maxFreq" min="0" max="87" value="63" step="1">
+          <div class="value-display" id="maxFreqDisplay">C6</div>
+        </div>
+      </div>
+
+      <div class="slider-group">
+        <label class="slider-label">Cent Difference (1-100)</label>
+        <div>
+          <label>Difference amount:</label>
+          <input type="range" id="cents" min="1" max="100" value="20" step="1">
+          <div class="value-display" id="centsDisplay">20 cents</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="score" id="score">Score: 0/0 (0%)</div>
+    <div id="feedback" class="feedback" style="display: none;"></div>
+
+    <div class="button-group">
+      <button id="playButton">Play Tones</button>
+      <button id="higherButton">Higher ↑</button>
+      <button id="lowerButton">Lower ↓</button>
+      <button id="nextButton" class="next">Next Tones</button>
+    </div>
+
+    <div class="keyboard-hints">
+      Space: Play tones | ↑: Higher | ↓: Lower | N: Next tones
+    </div>
+  </div>
+
+  <script>
+    // Note data - A0 to C8
+    const NOTES = (() => {
+      const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const notes = [];
+      const A4_FREQ = 440;
+      const A4_INDEX = 9 + 12 * 4; // A is index 9, octave 4
+
+      // Generate all notes from A0 to C8
+      for (let i = 0; i < 88; i++) {
+        const halfStepsFromA4 = i - (A4_INDEX - 9); // Offset to start at A0
+        const freq = A4_FREQ * Math.pow(2, halfStepsFromA4 / 12);
+        const octave = Math.floor((i + 9) / 12); // +9 to start from A0
+        const noteName = noteNames[(i + 9) % 12] + octave;
+        notes.push({ name: noteName, frequency: freq });
+      }
+      return notes;
+    })();
+
+    const A2_INDEX = 21; // Index of A2 in our NOTES array
+    const TOTAL_NOTES = 87; // Number of notes from A2 to C8
+
+    let audioContext = null;
+    let isPlaying = false;
+    let currentSequence = null;
+    let lastDifference = null;
+    let score = 0;
+    let totalAttempts = 0;
+    let hasGuessed = false;
+    let lastBaseNoteIndex = null;
+
+    // UI elements
+    const playButton = document.getElementById('playButton');
+    const higherButton = document.getElementById('higherButton');
+    const lowerButton = document.getElementById('lowerButton');
+    const nextButton = document.getElementById('nextButton');
+    const feedbackDiv = document.getElementById('feedback');
+    const scoreDiv = document.getElementById('score');
+
+    // Initialize sliders
+    const sliders = {
+      minFreq: document.getElementById('minFreq'),
+      maxFreq: document.getElementById('maxFreq'),
+      cents: document.getElementById('cents')
+    };
+
+    // Initialize displays
+    const displays = {
+      minFreq: document.getElementById('minFreqDisplay'),
+      maxFreq: document.getElementById('maxFreqDisplay'),
+      cents: document.getElementById('centsDisplay')
+    };
+
+    // Update displays and handle slider interactions
+    sliders.minFreq.addEventListener('input', (e) => {
+      const minIndex = parseInt(e.target.value);
+      const maxIndex = parseInt(sliders.maxFreq.value);
+      
+      if (minIndex > maxIndex) {
+        const newMax = Math.min(minIndex, 87);
+        sliders.maxFreq.value = newMax;
+        displays.maxFreq.textContent = NOTES[newMax].name;
+      }
+      
+      displays.minFreq.textContent = NOTES[minIndex].name;
+    });
+
+    sliders.maxFreq.addEventListener('input', (e) => {
+      const maxIndex = parseInt(e.target.value);
+      const minIndex = parseInt(sliders.minFreq.value);
+      
+      if (maxIndex < minIndex) {
+        const newMin = maxIndex;
+        sliders.minFreq.value = newMin;
+        displays.minFreq.textContent = NOTES[newMin].name;
+      }
+      
+      displays.maxFreq.textContent = NOTES[maxIndex].name;
+    });
+
+    sliders.cents.addEventListener('input', (e) => {
+      const centsValue = parseInt(e.target.value);
+      displays.cents.textContent = `${centsValue} cents`;
+    });
+
+    function getGainForNote(noteIndex) {
+      // Linear interpolation from 0dB at A2 to -24dB at C8
+      const position = (noteIndex - A2_INDEX) / TOTAL_NOTES;
+      return Math.pow(16, -position);
+    }
+
+    function initAudio() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+
+    async function playTone(frequency, noteIndex, duration = 0.75) {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+      
+      const baseGain = 0.2;
+      const attenuatedGain = baseGain * getGainForNote(noteIndex);
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(attenuatedGain, audioContext.currentTime + 0.05);
+      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + duration);
+      
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + duration);
+
+      return new Promise(resolve => setTimeout(resolve, duration * 1000));
+    }
+
+    function getRandomFrequency() {
+      const minIndex = parseInt(sliders.minFreq.value);
+      const maxIndex = parseInt(sliders.maxFreq.value);
+      const randomIndex = Math.floor(Math.random() * (maxIndex - minIndex + 1)) + minIndex;
+      lastBaseNoteIndex = randomIndex;
+      return { frequency: NOTES[randomIndex].frequency, noteIndex: randomIndex };
+    }
+
+    function centsToRatio(cents) {
+      return Math.pow(2, cents / 1200);
+    }
+
+    function generateNewSequence() {
+      const { frequency: baseFreq, noteIndex } = getRandomFrequency();
+      const cents = Number(sliders.cents.value);
+      const direction = Math.random() < 0.5 ? -1 : 1;
+      const centDifference = direction * cents;
+      const finalFreq = baseFreq * centsToRatio(centDifference);
+      
+      return {
+        baseFreq,
+        finalFreq,
+        centDifference,
+        noteIndex
+      };
+    }
+
+    async function playSequence() {
+      if (isPlaying) return;
+      
+      initAudio();
+      isPlaying = true;
+      playButton.disabled = true;
+      
+      if (!currentSequence) {
+        currentSequence = generateNewSequence();
+        lastDifference = currentSequence.centDifference;
+        hasGuessed = false;
+        feedbackDiv.style.display = 'none';
+      }
+      
+      for (let i = 0; i < 3; i++) {
+        await playTone(currentSequence.baseFreq, currentSequence.noteIndex);
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      await playTone(currentSequence.finalFreq, currentSequence.noteIndex);
+      
+      isPlaying = false;
+      playButton.disabled = false;
+      
+      higherButton.disabled = hasGuessed;
+      lowerButton.disabled = hasGuessed;
+    }
+
+    function nextSequence() {
+      currentSequence = null;
+      playSequence();
+    }
+
+    function updateScore() {
+      scoreDiv.textContent = `Score: ${score}/${totalAttempts} (${totalAttempts > 0 ? ((score/totalAttempts) * 100).toFixed(1) : 0}%)`;
+    }
+
+    function showFeedback(correct) {
+      feedbackDiv.style.display = 'block';
+      feedbackDiv.className = `feedback ${correct ? 'correct' : 'incorrect'}`;
+      const baseNote = NOTES[lastBaseNoteIndex].name;
+      feedbackDiv.innerHTML = `
+        <div>${correct ? 'Correct!' : 'Incorrect!'}</div>
+        <div>Base note: ${baseNote}</div>
+        <div>The difference was ${Math.abs(lastDifference)} cents ${lastDifference > 0 ? 'higher' : 'lower'}</div>
+      `;
+    }
+
+    function handleGuess(isHigher) {
+      if (!currentSequence || isPlaying || hasGuessed) return;
+      
+      const correct = (currentSequence.centDifference > 0) === isHigher;
+      score += correct ? 1 : 0;
+      totalAttempts += 1;
+      updateScore();
+      showFeedback(correct);
+      hasGuessed = true;
+      
+      higherButton.disabled = true;
+      lowerButton.disabled = true;
+    }
+
+    // Event listeners
+    playButton.addEventListener('click', playSequence);
+    higherButton.addEventListener('click', () => handleGuess(true));
+    lowerButton.addEventListener('click', () => handleGuess(false));
+    nextButton.addEventListener('click', nextSequence);
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && !isPlaying) {
+        e.preventDefault();
+        playSequence();
+      } else if (e.code === 'ArrowUp' && !isPlaying && !hasGuessed) {
+        handleGuess(true);
+      } else if (e.code === 'ArrowDown' && !isPlaying && !hasGuessed) {
+        handleGuess(false);
+      } else if (e.code === 'KeyN' && !isPlaying) {
+        nextSequence();
+      }
+    });
+
+    // Initialize note displays
+    displays.minFreq.textContent = NOTES[39].name;
+    displays.maxFreq.textContent = NOTES[63].name;
+  </script>
+</body>
+</html>
