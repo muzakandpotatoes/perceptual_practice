@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frequency Guessing Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            text-align: center;
+            width: 80%;
+            max-width: 500px;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        input[type="number"] {
+            width: 60px;
+            padding: 5px;
+            font-size: 16px;
+        }
+        #result {
+            font-size: 18px;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        .range-sliders {
+            margin: 20px 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            margin: 5px 0;
+        }
+        .slider-container input {
+            flex-grow: 1;
+            margin: 0 10px;
+        }
+        .slider-label {
+            width: 50px;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Frequency Guessing Game</h1>
+        <p>Set the frequency range:</p>
+        <div class="range-sliders">
+            <div class="slider-container">
+                <span class="slider-label">Min:</span>
+                <input type="range" id="minSlider" min="1" max="40" value="1" step="1">
+                <span id="minValue">1 Hz</span>
+            </div>
+            <div class="slider-container">
+                <span class="slider-label">Max:</span>
+                <input type="range" id="maxSlider" min="1" max="40" value="40" step="1">
+                <span id="maxValue">40 Hz</span>
+            </div>
+        </div>
+        <p id="rangeDisplay">Range: 1 Hz - 40 Hz</p>
+        <p>Listen to the clicks and try to guess their frequency</p>
+        <button id="playButton">Play Sound</button>
+        <input type="number" id="guessInput" min="1" max="40" placeholder="Hz">
+        <button id="guessButton">Guess</button>
+        <button id="nextButton">Next</button>
+        <p id="result"></p>
+    </div>
+
+    <script>
+        let audioContext;
+        let currentFrequency;
+        let minFrequency = 1;
+        let maxFrequency = 40;
+        let isPlaying = false;
+
+        const minSlider = document.getElementById('minSlider');
+        const maxSlider = document.getElementById('maxSlider');
+        const minValueDisplay = document.getElementById('minValue');
+        const maxValueDisplay = document.getElementById('maxValue');
+        const rangeDisplay = document.getElementById('rangeDisplay');
+        const playButton = document.getElementById('playButton');
+        const guessInput = document.getElementById('guessInput');
+        const guessButton = document.getElementById('guessButton');
+        const resultDisplay = document.getElementById('result');
+
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        function playClick() {
+            const clickOscillator = audioContext.createOscillator();
+            const clickGain = audioContext.createGain();
+            
+            clickOscillator.type = 'sine';
+            clickOscillator.frequency.setValueAtTime(1000, audioContext.currentTime);
+            
+            clickGain.gain.setValueAtTime(0, audioContext.currentTime);
+            clickGain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.001);
+            clickGain.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.01);
+            
+            clickOscillator.connect(clickGain);
+            clickGain.connect(audioContext.destination);
+            
+            clickOscillator.start();
+            clickOscillator.stop(audioContext.currentTime + 0.01);
+        }
+
+        function playClicksAtFrequency(frequency) {
+            if (!audioContext) initAudio();
+            
+            function scheduleClick() {
+                playClick();
+                if (isPlaying) {
+                    setTimeout(scheduleClick, 1000 / frequency);
+                }
+            }
+            
+            scheduleClick();
+        }
+
+        function generateFrequency() {
+            return Math.floor(Math.random() * (maxFrequency - minFrequency + 1)) + minFrequency;
+        }
+
+        function updateRange() {
+            minFrequency = parseInt(minSlider.value);
+            maxFrequency = parseInt(maxSlider.value);
+            
+            if (minFrequency > maxFrequency) {
+                if (this === minSlider) {
+                    maxFrequency = minFrequency;
+                    maxSlider.value = maxFrequency;
+                } else {
+                    minFrequency = maxFrequency;
+                    minSlider.value = minFrequency;
+                }
+            }
+
+            minValueDisplay.textContent = `${minFrequency} Hz`;
+            maxValueDisplay.textContent = `${maxFrequency} Hz`;
+            rangeDisplay.textContent = `Range: ${minFrequency} Hz - ${maxFrequency} Hz`;
+
+            currentFrequency = generateFrequency();
+            resultDisplay.textContent = 'New frequency generated. Click "Play Sound" to start.';
+        }
+
+        minSlider.addEventListener('input', updateRange);
+        maxSlider.addEventListener('input', updateRange);
+
+        playButton.addEventListener('click', () => {
+            if (isPlaying) {
+                playButton.textContent = 'Play Sound';
+                isPlaying = false;
+            } else {
+                playButton.textContent = 'Stop Sound';
+                isPlaying = true;
+                playClicksAtFrequency(currentFrequency);
+            }
+        });
+
+        guessButton.addEventListener('click', () => {
+            const guess = parseInt(guessInput.value);
+            if (isNaN(guess) || guess < minFrequency || guess > maxFrequency) {
+                resultDisplay.textContent = `Please enter a valid number between ${minFrequency} and ${maxFrequency}.`;
+            } else {
+                const difference = Math.abs(guess - currentFrequency);
+                if (difference === 0) {
+                    resultDisplay.textContent = `Correct! The frequency is ${currentFrequency} Hz.`;
+                } else if (difference <= 2) {
+                    resultDisplay.textContent = `Very close! The frequency is ${currentFrequency} Hz.`;
+                } else if (difference <= 5) {
+                    resultDisplay.textContent = `Close, but not quite. The frequency is ${currentFrequency} Hz.`;
+                } else {
+                    resultDisplay.textContent = `Not quite. The frequency is ${currentFrequency} Hz.`;
+                }
+            }
+        });
+
+        document.getElementById('nextButton').addEventListener('click', () => {
+            isPlaying = false;
+            playButton.textContent = 'Play Sound';
+            currentFrequency = generateFrequency();
+            resultDisplay.textContent = 'New frequency generated. Click "Play Sound" to start.';
+            guessInput.value = '';
+        });
+
+        // Initialize the game
+        currentFrequency = generateFrequency();
+    </script>
+</body>
+</html>
