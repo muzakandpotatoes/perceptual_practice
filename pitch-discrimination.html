@@ -45,6 +45,8 @@
       color: white;
       cursor: pointer;
       min-width: 100px;
+      transition: all 0.2s ease;
+      position: relative;
     }
     button:disabled {
       background: #93c5fd;
@@ -52,6 +54,24 @@
     }
     button.next {
       background: #059669;
+    }
+    button.selected {
+      background: #1d4ed8;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+    }
+    button .shortcut {
+      position: absolute;
+      bottom: -1.2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.7rem;
+      color: #666;
+    }
+    button#submitGuess {
+      background: #ea580c;
+    }
+    button#submitGuess:disabled {
+      background: #fed7aa;
     }
     .feedback {
       text-align: center;
@@ -106,6 +126,9 @@
           <input type="range" id="cents" min="1" max="100" value="20" step="1">
           <div class="value-display" id="centsDisplay">20 cents</div>
         </div>
+        <div>
+          <label><input type="checkbox" id="includeSame" checked> Include same pitch</label>
+        </div>
       </div>
 
       <div class="slider-group">
@@ -117,7 +140,7 @@
         </div>
         <div>
           <label>Tone duration:</label>
-          <input type="range" id="duration" min="10" max="200" value="75" step="5">
+          <input type="range" id="duration" min="25" max="200" value="75" step="5">
           <div class="value-display" id="durationDisplay">0.75 seconds</div>
         </div>
       </div>
@@ -127,14 +150,20 @@
     <div id="feedback" class="feedback" style="display: none;"></div>
 
     <div class="button-group">
-      <button id="playButton">Play Tones</button>
-      <button id="higherButton">Higher ↑</button>
-      <button id="lowerButton">Lower ↓</button>
-      <button id="nextButton" class="next">Next Tones</button>
+      <button id="playButton">Play Tones<span class="shortcut">Space</span></button>
+    </div>
+    <div class="button-group">
+      <button id="higherButton">Higher<span class="shortcut">J</span></button>
+      <button id="sameButton">Same<span class="shortcut">K</span></button>
+      <button id="lowerButton">Lower<span class="shortcut">L</span></button>
+    </div>
+    <div class="button-group">
+      <button id="submitGuess" disabled>Submit<span class="shortcut">Enter</span></button>
+      <button id="nextButton" class="next">Next Tones<span class="shortcut">N</span></button>
     </div>
 
     <div class="keyboard-hints">
-      Space: Play tones | ↑: Higher | ↓: Lower | N: Next tones
+      Space: Play tones | J: Higher | K: Same | L: Lower | Enter: Submit | N: Next
     </div>
   </div>
 
@@ -168,6 +197,7 @@
     let hasGuessed = false;
     let lastBaseNoteIndex = null;
     let sequenceStartTime = null;
+    let currentSelection = null;
 
     function getGameLogs() {
         return JSON.parse(localStorage.getItem('pitchGameLogs') || '[]');
@@ -181,7 +211,6 @@
         });
         localStorage.setItem('pitchGameLogs', JSON.stringify(logs));
         
-        // Check if we should do a backup save (every 50 attempts)
         if (logs.length % 50 === 0) {
             exportLogs();
         }
@@ -191,14 +220,12 @@
         const logs = getGameLogs();
         if (logs.length === 0) return;
 
-        // Convert to CSV
         const headers = Object.keys(logs[0]);
         const csvContent = [
             headers.join(','),
             ...logs.map(log => headers.map(header => JSON.stringify(log[header])).join(','))
         ].join('\n');
 
-        // Create and trigger download
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -209,16 +236,18 @@
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
 
-        // Clear logs after successful export
         localStorage.removeItem('pitchGameLogs');
     }
 
     const playButton = document.getElementById('playButton');
     const higherButton = document.getElementById('higherButton');
+    const sameButton = document.getElementById('sameButton');
     const lowerButton = document.getElementById('lowerButton');
+    const submitButton = document.getElementById('submitGuess');
     const nextButton = document.getElementById('nextButton');
     const feedbackDiv = document.getElementById('feedback');
     const scoreDiv = document.getElementById('score');
+    const includeSameCheckbox = document.getElementById('includeSame');
 
     const sliders = {
         minFreq: document.getElementById('minFreq'),
@@ -236,7 +265,6 @@
         duration: document.getElementById('durationDisplay')
     };
 
-    // Add event listeners for new sliders
     sliders.repetitions.addEventListener('input', (e) => {
         const value = parseInt(e.target.value);
         displays.repetitions.textContent = `${value} time${value === 1 ? '' : 's'}`;
@@ -247,7 +275,6 @@
         displays.duration.textContent = `${value.toFixed(2)} seconds`;
     });
 
-    // Previous slider event listeners
     sliders.minFreq.addEventListener('input', (e) => {
         const minIndex = parseInt(e.target.value);
         const maxIndex = parseInt(sliders.maxFreq.value);
@@ -327,7 +354,12 @@
     function generateNewSequence() {
         const { frequency: baseFreq, noteIndex } = getRandomFrequency();
         const cents = Number(sliders.cents.value);
-        const direction = Math.random() < 0.5 ? -1 : 1;
+        
+        // Randomly choose between -1 (lower), 0 (same), or 1 (higher),
+        // excluding 0 when same pitch is turned off
+        const direction = includeSameCheckbox.checked
+            ? Math.floor(Math.random() * 3) - 1
+            : (Math.random() < 0.5 ? -1 : 1);
         const centDifference = direction * cents;
         const finalFreq = baseFreq * centsToRatio(centDifference);
         
@@ -336,7 +368,6 @@
             finalFreq,
             centDifference,
             noteIndex,
-            // Store current playback settings with the sequence
             repetitions: parseInt(sliders.repetitions.value),
             toneDuration: parseInt(sliders.duration.value) / 100
         };
@@ -355,9 +386,9 @@
             hasGuessed = false;
             feedbackDiv.style.display = 'none';
             sequenceStartTime = Date.now();
+            clearSelection();
         }
         
-        // Use the stored repetitions and duration from the sequence
         for (let i = 0; i < currentSequence.repetitions; i++) {
             await playTone(currentSequence.baseFreq, currentSequence.noteIndex, currentSequence.toneDuration);
             await new Promise(resolve => setTimeout(resolve, 250));
@@ -367,12 +398,50 @@
         isPlaying = false;
         playButton.disabled = false;
         
-        higherButton.disabled = hasGuessed;
-        lowerButton.disabled = hasGuessed;
+        if (!hasGuessed) {
+            enableAnswerButtons(true);
+        }
+    }
+
+    function clearSelection() {
+        currentSelection = null;
+        higherButton.classList.remove('selected');
+        sameButton.classList.remove('selected');
+        lowerButton.classList.remove('selected');
+        submitButton.disabled = true;
+    }
+
+    function setSelection(type) {
+        if (hasGuessed || isPlaying) return;
+        
+        clearSelection();
+        currentSelection = type;
+        
+        switch(type) {
+            case 'higher':
+                higherButton.classList.add('selected');
+                break;
+            case 'same':
+                sameButton.classList.add('selected');
+                break;
+            case 'lower':
+                lowerButton.classList.add('selected');
+                break;
+        }
+        
+        submitButton.disabled = false;
+    }
+
+    function enableAnswerButtons(enabled) {
+        higherButton.disabled = !enabled;
+        sameButton.disabled = !enabled || !includeSameCheckbox.checked;
+        lowerButton.disabled = !enabled;
+        submitButton.disabled = !enabled || !currentSelection;
     }
 
     function nextSequence() {
         currentSequence = null;
+        clearSelection();
         playSequence();
     }
 
@@ -387,55 +456,77 @@
         feedbackDiv.innerHTML = `
             <div>${correct ? 'Correct!' : 'Incorrect!'}</div>
             <div>Base note: ${baseNote}</div>
-            <div>The difference was ${Math.abs(lastDifference)} cents ${lastDifference > 0 ? 'higher' : 'lower'}</div>
+            <div>The difference was ${Math.abs(lastDifference)} cents ${lastDifference > 0 ? 'higher' : lastDifference < 0 ? 'lower' : 'the same'}</div>
         `;
     }
 
-    function handleGuess(isHigher) {
-        if (!currentSequence || isPlaying || hasGuessed) return;
+    function handleGuess() {
+        if (!currentSequence || isPlaying || hasGuessed || !currentSelection) return;
         
-        const correct = (currentSequence.centDifference > 0) === isHigher;
-        score += correct ? 1 : 0;
+        let isCorrect = false;
+        switch(currentSelection) {
+            case 'higher':
+                isCorrect = currentSequence.centDifference > 0;
+                break;
+            case 'same':
+                isCorrect = currentSequence.centDifference === 0;
+                break;
+            case 'lower':
+                isCorrect = currentSequence.centDifference < 0;
+                break;
+        }
+        
+        score += isCorrect ? 1 : 0;
         totalAttempts += 1;
         
         logAttempt({
             baseNote: NOTES[lastBaseNoteIndex].name,
             baseFrequency: currentSequence.baseFreq,
             centDifference: currentSequence.centDifference,
-            actualDirection: currentSequence.centDifference > 0 ? 'higher' : 'lower',
-            guessedDirection: isHigher ? 'higher' : 'lower',
-            correct,
+            actualDirection: currentSequence.centDifference > 0 ? 'higher' : 
+                           currentSequence.centDifference < 0 ? 'lower' : 'same',
+            guessedDirection: currentSelection,
+            correct: isCorrect,
             responseTimeMs: Date.now() - sequenceStartTime,
             settings: {
                 minNote: NOTES[parseInt(sliders.minFreq.value)].name,
                 maxNote: NOTES[parseInt(sliders.maxFreq.value)].name,
                 centDifferenceAmount: parseInt(sliders.cents.value),
+                includeSame: includeSameCheckbox.checked,
                 repetitions: currentSequence.repetitions,
                 toneDuration: currentSequence.toneDuration
             }
         });
         
         updateScore();
-        showFeedback(correct);
+        showFeedback(isCorrect);
         hasGuessed = true;
-        
-        higherButton.disabled = true;
-        lowerButton.disabled = true;
+        enableAnswerButtons(false);
     }
 
+    higherButton.addEventListener('click', () => setSelection('higher'));
+    sameButton.addEventListener('click', () => setSelection('same'));
+    lowerButton.addEventListener('click', () => setSelection('lower'));
+    includeSameCheckbox.addEventListener('change', () => {
+        if (!includeSameCheckbox.checked && currentSelection === 'same') clearSelection();
+        sameButton.disabled = !includeSameCheckbox.checked || isPlaying || hasGuessed;
+    });
+    submitButton.addEventListener('click', handleGuess);
     playButton.addEventListener('click', playSequence);
-    higherButton.addEventListener('click', () => handleGuess(true));
-    lowerButton.addEventListener('click', () => handleGuess(false));
     nextButton.addEventListener('click', nextSequence);
 
     document.addEventListener('keydown', (e) => {
         if (e.code === 'Space' && !isPlaying) {
             e.preventDefault();
             playSequence();
-        } else if (e.code === 'ArrowUp' && !isPlaying && !hasGuessed) {
-            handleGuess(true);
-        } else if (e.code === 'ArrowDown' && !isPlaying && !hasGuessed) {
-            handleGuess(false);
+        } else if (e.code === 'KeyJ' && !isPlaying && !hasGuessed) {
+            setSelection('higher');
+        } else if (e.code === 'KeyK' && !isPlaying && !hasGuessed && includeSameCheckbox.checked) {
+            setSelection('same');
+        } else if (e.code === 'KeyL' && !isPlaying && !hasGuessed) {
+            setSelection('lower');
+        } else if (e.code === 'Enter' && !isPlaying && !hasGuessed && currentSelection) {
+            handleGuess();
         } else if (e.code === 'KeyN' && !isPlaying) {
             nextSequence();
         }
